@@ -1,6 +1,7 @@
 #include "core/config.h"
 #include "core/host_clock.h"
 #include "core/portable.h"
+#include "host/dlaa.h"
 #include "host/foreign_hooks.h"
 #include "host/gpu_internal.h"
 #include "host/shader_patch.h"
@@ -1612,6 +1613,7 @@ bool init_locked() {
         layers.push_back("VK_LAYER_KHRONOS_validation");
         iext.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
+    dlaa_add_instance_extensions(iext);
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
     ici.enabledExtensionCount = static_cast<std::uint32_t>(iext.size());
@@ -1876,6 +1878,7 @@ bool init_locked() {
     } else {
         g.fifo_latest_ready_ext = nullptr;
     }
+    dlaa_add_device_extensions(g.phys, dext);
     VkPhysicalDeviceFaultFeaturesEXT ffault{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT};
     ffault.deviceFault = VK_TRUE;
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};

@@ -10,6 +10,7 @@
 #include "engine/option_menu.h"
 #include "hle/modules.h"
 #include "host/bindings.h"
+#include "host/dlaa.h"
 #include "host/options.h"
 #include "host/settings.h"
 #include "host/overlay.h"
@@ -1656,6 +1657,12 @@ bool host_window_pump() {
                 // F10 opens the port's options screen, and while it is open it
                 // takes every key: it is modal, so nothing leaks to the pad.
                 if (host_options_key(e.key.scancode, e.key.repeat)) {
+                    break;
+                }
+                // Ctrl+F1-F4: DLAA's keys (host/dlaa.h); Ctrl+F5-F8 the same,
+                // for keyboards where another program holds a Ctrl+F1-F4 hotkey.
+                if (!e.key.repeat && (e.key.mod & SDL_KMOD_CTRL) && e.key.scancode >= SDL_SCANCODE_F1 &&
+                    e.key.scancode <= SDL_SCANCODE_F8 && gpu::dlaa_hotkey(1 + (e.key.scancode - SDL_SCANCODE_F1) % 4)) {
                     break;
                 }
                 if (!e.key.repeat && e.key.scancode == SDL_SCANCODE_F11) {
