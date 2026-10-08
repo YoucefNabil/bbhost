@@ -27,6 +27,17 @@ bool parse_version(const std::string& v, int out[3]) {
     return true;
 }
 
+int fork_release(const std::string& v) {
+    static const std::string kMark = "-dlaa.";
+    const std::size_t at = v.find(kMark);
+    if (at == std::string::npos) return 0;
+    std::size_t i = at + kMark.size();
+    if (i >= v.size() || v[i] < '0' || v[i] > '9') return 0;
+    int n = 0;
+    while (i < v.size() && v[i] >= '0' && v[i] <= '9') n = n * 10 + (v[i++] - '0');
+    return n;
+}
+
 bool is_newer(const std::string& tag, const std::string& current) {
     int t[3], c[3];
     if (!parse_version(tag, t)) return false;
@@ -34,7 +45,7 @@ bool is_newer(const std::string& tag, const std::string& current) {
     for (int k = 0; k < 3; ++k) {
         if (t[k] != c[k]) return t[k] > c[k];
     }
-    return false;
+    return fork_release(tag) > fork_release(current);
 }
 
 bool signature_ok(const std::string& manifest, const std::string& signature, const std::uint8_t public_key[32]) {
