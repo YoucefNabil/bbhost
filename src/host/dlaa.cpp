@@ -172,13 +172,21 @@ struct State {
     bool anchor_missing_said = false;
     std::uint64_t evaluations = 0, failures = 0;
     std::chrono::steady_clock::time_point last_eval{};
-    // The main depth: the last depth target drawn with depth writes on, by size.
+    // The depth targets drawn with depth writes on, least recently written
+    // replaced first. Some views draw eight a frame (shadows, the half-size
+    // pass, a probe's mip chain): too few slots and the main depth is pushed
+    // out before the anchor. Some views draw eight a frame (shadows, the
+    // half-size pass, a chain of 256 to 32 pixel targets).
     struct Depth {
         std::uint64_t base = 0;
         std::uint32_t w = 0, h = 0;
         std::uint64_t flip = 0;
+        std::uint64_t last = 0;    // depth_writes at its last write
         std::uint64_t writes = 0;  // depth-writing draws since the last anchor
-    } depths[4];
+    } depths[16];
+    // Anchors skipped (no scene image with a matching depth) in a row, and
+    // in all: said when it starts and when it ends.
+    std::uint64_t skipped_run = 0, skipped = 0;
     std::uint64_t logged_scene = 0, logged_depth = 0;
     // The main depth (the scene's, from the last anchor): the draws
     // that test against it are the scene's geometry. They are jittered by a
@@ -634,16 +642,17 @@ void dlaa_after_draw_locked(const DrawRec& r) {
         if (!slot) {
             slot = &g_s.depths[0];
             for (State::Depth& d : g_s.depths) {
-                if (d.flip < slot->flip) slot = &d;
+                if (d.last < slot->last) slot = &d;
             }
             const RtImage* rt = find_render_target(r.depth);
             slot->base = r.depth;
             slot->w = rt ? rt->width : 0;
             slot->h = rt ? rt->height : 0;
+            slot->writes = 0;
         }
         slot->flip = hle_video_flip_count();
         ++slot->writes;
-        ++g_s.depth_writes;
+        slot->last = ++g_s.depth_writes;
         // Said once: 3D frames for ten seconds and never the anchor.
         if (!g_s.anchor_calls && !g_s.anchor_missing_said && g_bridge.evaluate) {
             if (!g_s.first_depth_flip) g_s.first_depth_flip = slot->flip;
@@ -854,14 +863,19 @@ void dlaa_anchor_locked(const std::uint64_t* sampled, int count) {
     for (State::Depth& d : g_s.depths) d.writes = 0;
     if (g_s.failed) return;
     if (!scene) {
-        static int said = 0;
-        if (said++ < 8) {
-            host_log("dlaa: anchor at flip %llu without a scene image and a matching depth (sampled 0x%llx 0x%llx); skipped",
+        ++g_s.skipped;
+        if (g_s.skipped_run++ == 0) {
+            host_log("dlaa: anchor at flip %llu without a scene image and a matching depth (sampled 0x%llx 0x%llx); skipped until there is one",
                      static_cast<unsigned long long>(flip), static_cast<unsigned long long>(count > 0 ? sampled[0] : 0),
                      static_cast<unsigned long long>(count > 1 ? sampled[1] : 0));
         }
         g_s.reset = true;
         return;
+    }
+    if (g_s.skipped_run) {
+        host_log("dlaa: a scene and its depth again at flip %llu, after %llu skipped anchors",
+                 static_cast<unsigned long long>(flip), static_cast<unsigned long long>(g_s.skipped_run));
+        g_s.skipped_run = 0;
     }
     RtImage* depth_rt = find_render_target(depth->base);
     if (!depth_rt || !depth_rt->depth || !depth_rt->initialised) {
@@ -969,12 +983,12 @@ void dlaa_anchor_locked(const std::uint64_t* sampled, int count) {
     if (++g_s.evaluations == 1 || g_s.evaluations == 300 || g_s.evaluations % 3600 == 0) {
         double pc[3] = {};
         if (g_s.cam_cur_ok) cam_pos(g_s.cam_cur, pc);
-        host_log("dlaa: %llu frames evaluated (flip %llu, anchor draws in the frame before: %llu); camera in %llu frames, kept from the "
-                 "last in %llu, at (%.2f %.2f %.2f); jitter (%.3f %.3f), %llu jittered draws since the last line",
+        host_log("dlaa: %llu frames evaluated (flip %llu, anchor draws in the frame before: %llu, anchors skipped: %llu); camera in %llu "
+                 "frames, kept from the last in %llu, at (%.2f %.2f %.2f); jitter (%.3f %.3f), %llu jittered draws since the last line",
                  static_cast<unsigned long long>(g_s.evaluations), static_cast<unsigned long long>(flip),
-                 static_cast<unsigned long long>(g_s.anchors_last_frame), static_cast<unsigned long long>(g_s.cam_frames),
-                 static_cast<unsigned long long>(g_s.cam_missing), pc[0], pc[1], pc[2], jx, jy,
-                 static_cast<unsigned long long>(g_s.jittered_draws));
+                 static_cast<unsigned long long>(g_s.anchors_last_frame), static_cast<unsigned long long>(g_s.skipped),
+                 static_cast<unsigned long long>(g_s.cam_frames), static_cast<unsigned long long>(g_s.cam_missing), pc[0], pc[1], pc[2], jx,
+                 jy, static_cast<unsigned long long>(g_s.jittered_draws));
         g_s.jittered_draws = 0;
     }
 }
