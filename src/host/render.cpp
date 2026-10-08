@@ -7,6 +7,7 @@
 #include "core/portable.h"
 #include "engine/gx_resources.h"
 #include "engine/gx_state.h"
+#include "host/dlaa.h"
 #include "host/gpu_internal.h"
 #include "host/shader_patch.h"
 #include "host/tess_lds.h"
@@ -247,6 +248,7 @@ struct GfxPipeline {
     // 1 for d3ca03f3+111fce32, 2 for 7d668276+e0305cef (the YEBIS probes in
     // draw_impl, which log once), 0 for the rest; -1 until a draw asks.
     std::int8_t yebis_probe = -1;
+    std::int8_t dlaa_anchor = -1;  // 1 for DLAA's anchor (dlaa_is_anchor), 0 for the rest; -1 until a draw asks
     // The optimized relink, queued at the pipeline's first draw
     // (queue_library_relink): its libraries, and the vertex library's
     // specialization - the elements' formats, the state it was made with.
@@ -7887,6 +7889,8 @@ void resolve_stage_buffers(const gcn::TranslateResult& meta, const std::uint32_t
         // A V# keeps memory-type bits above its 40-bit address; a pointer pair is the address.
         const std::uint64_t hi = b.pointer ? words[1] : (words[1] & 0xff);
         const std::uint64_t base = resolved ? static_cast<std::uint64_t>(words[0]) | (hi << 32) : 0;
+        if (g_dlaa_cb_capturing.load(std::memory_order_relaxed) && !b.pointer) dlaa_cb_note_locked(i, base, bytes);
+        if (t_dlaa_main_draw && t_dlaa_cb_stage == 0 && !b.pointer) dlaa_camera_note_locked(base, bytes);
         int outcome = !base ? kNoBase : (base & 3) || !shape ? kUnaligned : kUnmapped;
         // Past the longest binding the range takes the page table: no one buffer need hold it.
         Located loc;
@@ -11442,6 +11446,19 @@ static bool draw_impl(const GpuDraw& d) {
         }
         return false;
     }
+    // DLAA: at the anchor (YEBIS's first colour write), before its pass, the
+    // HDR scene it samples goes through DLSS (dlaa.cpp).
+    if (pl.dlaa_anchor < 0) pl.dlaa_anchor = dlaa_is_anchor(pl.name) ? 1 : 0;
+    if (pl.dlaa_anchor == 1) {
+        std::uint64_t sampled[2] = {};
+        const auto& images = pl.ps.meta().images;
+        const int n = static_cast<int>(std::min<std::size_t>(images.size(), 2));
+        for (int k = 0; k < n; ++k) {
+            std::uint32_t tw[8] = {};
+            if (resolve_binding(images[k].path, s.ps_user, gx_stage[1], 8, tw)) sampled[k] = tsharp_base(tw);
+        }
+        dlaa_anchor_locked(sampled, n);
+    }
     // A pipeline that reads memory through the page table could read a
     // copy-back's destination before its copy is in place (copy versions).
     if (copy_versions_pending_locked() && (!pl.vs.meta().walks.empty() || !pl.ps.meta().walks.empty())) {
@@ -12183,6 +12200,7 @@ static bool draw_impl(const GpuDraw& d) {
 
     int reused_way[2] = {-1, -1};
     std::uint32_t stage_named[2] = {0, 0};  // user-data dwords each stage built from GX
+    t_dlaa_main_draw = dlaa_main_draw_locked(s.depth ? s.depth->base : 0, s.depth_control, s.prim, d.index_count);
     for (int st = 0; st < 2; ++st) {
         const gcn::TranslateResult& meta = st == 0 ? pl.vs.meta() : pl.ps.meta();
         const std::size_t stage_writes = writes.size();
@@ -12315,7 +12333,9 @@ static bool draw_impl(const GpuDraw& d) {
             std::memcpy(params.vertex_formats, t_tess->hs_user, sizeof(params.vertex_formats));
             if (gx_stage[0]) put_tess_constants(*gx_stage[0], t_tess->tess_vsharp, params.user_sgpr);
         }
+        t_dlaa_cb_stage = static_cast<int>(st);  // F12's constant-buffer capture (dlaa.cpp)
         resolve_stage_buffers(meta, params.user_sgpr, params, buffer_infos, gx_stage[st]);
+        t_dlaa_cb_stage = -1;
         if (!meta.buffers.empty()) {
             any_buffers = true;
             all_bound = all_bound && params.cb_valid == (1u << meta.buffers.size()) - 1;
@@ -12975,6 +12995,14 @@ static bool draw_impl(const GpuDraw& d) {
         vp.minDepth = 0.0f;
         vp.maxDepth = 1.0f;
     }
+    // DLAA's jitter: the scene's geometry shifted by a sub-pixel amount (dlaa.cpp).
+    if (t_dlaa_main_draw) {
+        float jx = 0.0f, jy = 0.0f;
+        dlaa_jitter_locked(&jx, &jy);
+        vp.x += jx;
+        vp.y += jy;
+        t_dlaa_main_draw = false;
+    }
     // A reversed range (zscale < 0) stays reversed: Vulkan only requires
     // both ends inside [0, 1].
     vp.minDepth = std::clamp(vp.minDepth, 0.0f, 1.0f);
@@ -13387,6 +13415,8 @@ static bool draw_impl(const GpuDraw& d) {
             }
         }
         r.tex0 = r.tex[0];
+        t_dlaa_main_draw = false;
+        dlaa_after_draw_locked(r);
     }
     if (g_trace) {
         static std::atomic<int> logs{0};
@@ -13527,6 +13557,7 @@ void host_gpu_request_dump() {
     if (g_dump_request.load(std::memory_order_acquire)) return;  // one already waits for its flip
     g_capture_dir = new_capture_dir();
     g_dump_request.store(true, std::memory_order_release);
+    gpu::dlaa_request_cb_capture(g_capture_dir);
     host_log("dump: F12 capture on the next flip, into %s", capture_dir_shown(g_capture_dir).c_str());
 }
 bool host_gpu_take_dump_request(std::string* dir) {
