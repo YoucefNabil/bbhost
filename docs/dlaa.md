@@ -79,3 +79,19 @@ cmake --build build/ngx_bridge --config Release
 
 The DLSS SDK (https://github.com/NVIDIA/DLSS) is not in this repository; it
 is under NVIDIA's RTX SDK licence.
+
+## Following upstream (a fork with DLAA)
+
+`update-dlaa.bat` (`tools/win/update_dlaa.ps1`) moves the DLAA commits onto the
+newest upstream master, pushes them to your fork, builds the Windows package in
+WSL (Arch Linux, `tools/ci_windows.sh`) and installs it into a new folder with
+the two DLLs:
+
+```
+git remote add upstream https://github.com/droogie/bbhost.git   (origin: your fork)
+update-dlaa.bat -InstallDir D:\bbhost -DllDir D:\dlaa-dlls -Setup   first time
+update-dlaa.bat -InstallDir D:\bbhost -DllDir D:\dlaa-dlls          afterwards
+```
+
+When upstream changes the same lines as DLAA, it stops and changes nothing;
+that rebase is done by hand.
