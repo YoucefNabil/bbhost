@@ -48,6 +48,12 @@ int main() {
     check(!is_newer("v0.1.0", "v0.1.0-3-gabc1234"), "a build past the tag keeps the tag");
     check(is_newer("v0.1.1", "v0.1.0-3-gabc1234"), "the next release is newer than a build past the last");
     check(!is_newer("v0.1.0", "v0.2.0"), "older is not newer");
+    check(fork_release("v0.2.16-dlaa.12-3-gabc1234") == 12 && fork_release("v0.2.16-3-gabc1234") == 0, "fork release number");
+    check(is_newer("v0.2.16-dlaa.2", "v0.2.16-dlaa.1"), "the next fork release is newer");
+    check(is_newer("v0.2.16-dlaa.1", "v0.2.16"), "a fork release is newer than its base");
+    check(!is_newer("v0.2.16-dlaa.1", "v0.2.16-dlaa.1-3-gabc1234"), "a build past a fork tag keeps the tag");
+    check(!is_newer("v0.2.16-dlaa.1", "v0.2.16-dlaa.2"), "an older fork release is not newer");
+    check(is_newer("v0.2.17-dlaa.1", "v0.2.16-dlaa.5"), "a newer base wins over the fork number");
     check(is_newer("v0.1.0", "v0.0.0-1cf3e08"), "an untagged build takes any release");
     check(!is_newer("nightly", "v0.1.0"), "a tag that is no version is never newer");
 

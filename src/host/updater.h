@@ -60,8 +60,12 @@ bool plugins_busy();
 bool parse_version(const std::string& v, int out[3]);
 // The release tag is newer than this build: a higher major.minor.patch. A
 // build past a tag ("v0.1.0-3-g...") is that tag's version, so the next
-// release is newer and the same tag is not.
+// release is newer and the same tag is not. On the same major.minor.patch, the
+// DLAA fork's release number decides: "v0.2.16-dlaa.2" is newer than
+// "v0.2.16-dlaa.1", which is newer than "v0.2.16".
 bool is_newer(const std::string& tag, const std::string& current);
+// "v0.2.16-dlaa.2..." -> 2; 0 without a "-dlaa.N".
+int fork_release(const std::string& v);
 // The manifest's Ed25519 signature (64 raw bytes) against `public_key` (32).
 bool signature_ok(const std::string& manifest, const std::string& signature, const std::uint8_t public_key[32]);
 // The lowercase hex SHA-256 the manifest (sha256sum's format) gives `name`, "" if none.
