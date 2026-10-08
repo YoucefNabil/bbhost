@@ -51,7 +51,13 @@ constexpr std::uint8_t kReleaseKey[32] = {
 const std::uint8_t* release_key() { return kReleaseKey; }
 
 namespace {
-constexpr const char* kDefaultSource = "https://api.github.com/repos/droogie/bbhost/releases/latest";
+// The DLAA fork's builds look for updates in the fork's releases: one from
+// droogie/bbhost would swap this exe for one without DLAA. The fork's releases
+// carry no SHA256SUMS.sig (only the original's release key signs), so a newer
+// one is announced with "get it from the release page" and never swapped in.
+// The official plugins still come from the original's latest release.
+constexpr const char* kDefaultSource = "https://api.github.com/repos/YoucefNabil/bbhost/releases/latest";
+constexpr const char* kPluginSource = "https://api.github.com/repos/droogie/bbhost/releases/latest";
 constexpr std::size_t kMaxDownload = 256u << 20;
 
 struct Release {
@@ -311,7 +317,7 @@ constexpr const char* kPluginExt = ".so";
 // Windows), which plugins_load puts in place at the next start.
 void fetch_plugins_thread(std::string dir) {
     set_plugins_status("looking for the latest official plugins...");
-    const std::string source = config().update_source.empty() ? kDefaultSource : config().update_source;
+    const std::string source = config().update_source.empty() ? kPluginSource : config().update_source;
     const Fetch f = fetch(source, false, 20000);
     json::Value v;
     std::string err;
